@@ -1,99 +1,116 @@
 {
   "name": "peer-calls",
-  "version": "2.0.7",
+  "version": "3.0.3",
   "description": "Group peer to peer video calls for anybody.",
   "repository": "https://github.com/jeremija/peer-calls",
-  "main": "src/index.js",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "bin": {
-    "peercalls": "./src/index.js"
+    "peer-calls": "./lib/index.js"
   },
   "scripts": {
-    "start": "node src/index.js",
-    "start:server": "nodemon src/index.js --ignore build/ --ignore src/client",
+    "start": "node lib/index.js",
+    "start:server": "nodemon -e ts,tsx --ignore src/client -x ts-node src/index.ts",
     "start:watch": "chastifol [ npm run js:watch ] [ npm run css:watch ] [ npm run start:server ]",
-    "watch": "",
     "prepublishOnly": "npm run build",
-    "build": "npm run css && npm run js",
+    "build": "npm run css && npm run ts && npm run js && npm run js:uglify",
     "test": "jest",
     "test:coverage": "jest --coverage",
     "test:watch": "jest --watch",
-    "js": "browserify -t babelify ./src/client/index.js -o ./build/index.js",
-    "js:watch": "watchify -d -v -t babelify ./src/client/index.js -o ./build/index.js",
+    "js": "browserify -g [ loose-envify purge --NODE_ENV production ] -t babelify ./lib/client/index.js -o ./build/index.prod.js",
+    "js:watch": "watchify -p tsify ./src/client/index.tsx -v -d -o ./build/index.js",
+    "js:uglify": "minify build/index.prod.js -o build/index.js",
     "css": "node-sass ./src/scss/style.scss -o ./build/",
     "css:watch": "npm run css && node-sass --watch ./src/scss/style.scss -o ./build/",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "ci": "npm run lint && npm run test:coverage && npm run build"
+    "lint": "eslint --ext ts,tsx .",
+    "lint:fix": "eslint --ext ts,tsx --fix .",
+    "ci": "npm run lint && npm run test:coverage && npm run build",
+    "ts:watch": "tsc --build . --watch --preserveWatchOutput",
+    "ts": "tsc --build .",
+    "clean": "rimraf lib/ tsconfig.tsbuildinfo build/*"
   },
   "babel": {
     "presets": [
-      "es2015",
-      "es2016",
-      "react"
-    ],
-    "plugins": [
-      "transform-object-rest-spread",
-      "transform-class-properties"
+      [
+        "@babel/preset-env",
+        {
+          "forceAllTransforms": true,
+          "targets": {
+            "browsers": [
+              "last 2 versions",
+              "safari >= 7",
+              "ie >= 11"
+            ]
+          }
+        }
+      ]
     ]
   },
   "author": "Jerko Steiner",
   "license": "MIT",
   "dependencies": {
-    "bluebird": "^3.3.4",
-    "classnames": "^2.2.5",
-    "config": "^1.26.1",
-    "express": "^4.13.3",
-    "prop-types": "^15.5.10",
-    "pug": "^2.0.0-rc.2",
-    "react": "^15.5.4",
-    "react-dom": "^15.5.4",
-    "react-redux": "^5.0.5",
-    "react-transition-group": "^1.1.3",
-    "redux": "^3.6.0",
-    "redux-logger": "^3.0.6",
-    "redux-promise-middleware": "^4.2.0",
-    "redux-thunk": "^2.2.0",
-    "screenfull": "^3.3.3",
-    "seamless-immutable": "^7.1.2",
-    "simple-peer": "^8.1.0",
-    "socket.io": "^2.1.1",
-    "socket.io-client": "^2.1.1",
-    "underscore": "^1.8.3",
-    "uuid": "^2.0.1"
+    "debug": "^4.1.1",
+    "ejs": "^2.7.4",
+    "express": "^4.17.1",
+    "js-yaml": "^3.13.1",
+    "lodash": "^4.17.15",
+    "socket.io": "^2.3.0",
+    "uuid": "^3.3.3"
   },
   "devDependencies": {
-    "babel-eslint": "^7.2.3",
-    "babel-jest": "^20.0.3",
-    "babel-plugin-transform-class-properties": "^6.24.1",
-    "babel-plugin-transform-object-rest-spread": "^6.23.0",
-    "babel-preset-es2015": "^6.24.1",
-    "babel-preset-es2016": "^6.24.1",
-    "babel-preset-react": "^6.24.1",
-    "babelify": "^7.3.0",
+    "@babel/core": "^7.7.2",
+    "@babel/polyfill": "^7.7.0",
+    "@babel/preset-env": "^7.7.1",
+    "@types/classnames": "^2.2.9",
+    "@types/debug": "^4.1.5",
+    "@types/ejs": "^2.6.3",
+    "@types/express": "^4.17.2",
+    "@types/jest": "^24.0.23",
+    "@types/js-yaml": "^3.12.1",
+    "@types/lodash": "^4.14.148",
+    "@types/node": "^12.12.8",
+    "@types/react": "^16.9.11",
+    "@types/react-dom": "^16.9.4",
+    "@types/react-redux": "^7.1.5",
+    "@types/react-transition-group": "^4.2.3",
+    "@types/redux-logger": "^3.0.7",
+    "@types/simple-peer": "^9.6.0",
+    "@types/socket.io": "^2.1.4",
+    "@types/socket.io-client": "^1.4.32",
+    "@types/supertest": "^2.0.8",
+    "@types/uuid": "^3.4.6",
+    "@typescript-eslint/eslint-plugin": "^2.7.0",
+    "@typescript-eslint/parser": "^2.7.0",
+    "acorn": "^7.1.0",
+    "babel-core": "^7.0.0-bridge.0",
+    "babel-minify": "^0.5.1",
+    "babelify": "^10.0.0",
     "chastifol": "^4.1.0",
-    "eslint": "^3.19.0",
-    "eslint-config-standard": "^10.2.1",
-    "eslint-config-standard-react": "^5.0.0",
-    "eslint-plugin-import": "^2.3.0",
-    "eslint-plugin-node": "^5.0.0",
-    "eslint-plugin-promise": "^3.5.0",
-    "eslint-plugin-react": "^7.0.1",
-    "eslint-plugin-standard": "^3.0.1",
-    "jest-cli": "^23.6.0",
-    "node-sass": "^4.5.3",
-    "nodemon": "^1.18.7",
-    "react-addons-test-utils": "^15.5.1",
-    "redux-mock-store": "^1.2.3",
-    "supertest": "^3.0.0",
-    "uglify-js": "^2.6.2",
-    "watchify": "^3.9.0"
-  },
-  "jest": {
-    "transform": {
-      ".*": "<rootDir>/node_modules/babel-jest"
-    },
-    "modulePathIgnorePatterns": [
-      "<rootDir>/node_modules/"
-    ]
+    "classnames": "^2.2.6",
+    "core-js": "^3.4.1",
+    "eslint": "^6.6.0",
+    "eslint-plugin-import": "^2.18.2",
+    "eslint-plugin-react": "^7.16.0",
+    "jest": "^24.9.0",
+    "loose-envify": "^1.4.0",
+    "node-sass": "^4.13.0",
+    "nodemon": "^1.19.4",
+    "react": "^16.12.0",
+    "react-dom": "^16.12.0",
+    "react-redux": "^7.1.3",
+    "react-transition-group": "^4.3.0",
+    "redux": "^4.0.4",
+    "redux-logger": "^3.0.6",
+    "redux-thunk": "^2.2.0",
+    "rimraf": "^3.0.0",
+    "screenfull": "^5.0.0",
+    "simple-peer": "^9.6.2",
+    "socket.io-client": "^2.3.0",
+    "supertest": "^4.0.2",
+    "ts-jest": "^24.1.0",
+    "ts-node": "^8.5.2",
+    "tsify": "^4.0.1",
+    "typescript": "^3.7.2",
+    "watchify": "^3.11.1"
   }
 }

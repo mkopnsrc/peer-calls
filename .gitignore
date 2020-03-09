@@ -5,6 +5,7 @@ dist/
 build/
 !build/.gitkeep
 node_modules/
-config.js
 coverage/
-config/local.json
+config/local.yaml
+lib/
+tsconfig.tsbuildinfo
