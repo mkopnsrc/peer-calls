@@ -1,61 +1,172 @@
+import { PubTrackEvent } from '../SocketEvent'
 import * as constants from '../constants'
+import { getStreamsByState } from '../selectors'
+import { ThunkResult } from '../store'
+import { Dim } from '../frame'
 
-export interface AddStreamPayload {
-  userId: string
+export type StreamType = 'camera' | 'desktop'
+export const StreamTypeCamera: StreamType = 'camera'
+export const StreamTypeDesktop: StreamType = 'desktop'
+
+export interface AddLocalStreamPayload {
+  type: StreamType
   stream: MediaStream
-  url?: string
 }
 
-export interface AddStreamAction {
-  type: 'PEER_STREAM_ADD'
-  payload: AddStreamPayload
-}
-
-export interface RemoveStreamAction {
+export interface RemoveLocalStreamAction {
   type: 'PEER_STREAM_REMOVE'
-  payload: RemoveStreamPayload
+  payload: RemoveLocalStreamPayload
 }
 
-export interface RemoveStreamPayload {
-  userId: string
+export interface RemoveLocalStreamPayload {
+  stream: MediaStream
+  streamType: StreamType
 }
 
-export interface SetActiveStreamAction {
-  type: 'ACTIVE_SET'
-  payload: RemoveStreamPayload
+export interface MinimizeTogglePayload {
+  peerId: string
+  streamId?: string
 }
 
-export interface ToggleActiveStreamAction {
-  type: 'ACTIVE_TOGGLE'
-  payload: UserIdPayload
+export interface StreamDimensionsPayload {
+  peerId: string
+  streamId: string
+  dimensions: Dim
 }
 
-export interface UserIdPayload {
-  userId: string
+export interface MaximizeParams {
+  peerId: string
+  streamId?: string
 }
 
-export const addStream = (payload: AddStreamPayload): AddStreamAction => ({
-  type: constants.STREAM_ADD,
+export interface MaximizePayload {
+  target: MaximizeParams
+  others: MinimizeTogglePayload[]
+}
+
+export interface MinimizeToggleAction {
+  type: 'MINIMIZE_TOGGLE'
+  payload: MinimizeTogglePayload
+}
+
+export interface MaximizeAction {
+  type: 'MAXIMIZE'
+  payload: MaximizePayload
+}
+
+export interface RemoveTrackPayload {
+  streamId: string
+  peerId: string
+  track: MediaStreamTrack
+}
+
+export interface RemoveTrackAction {
+  type: 'PEER_STREAM_TRACK_REMOVE'
+  payload: RemoveTrackPayload
+}
+
+export interface AddTrackPayload {
+  streamId: string
+  peerId: string
+  track: MediaStreamTrack
+  receiver: RTCRtpReceiver
+}
+
+export interface AddTrackAction {
+  type: 'PEER_STREAM_TRACK_ADD'
+  payload: AddTrackPayload
+}
+
+export interface PeerIdPayload {
+  peerId: string
+}
+
+export interface PubTrackEventAction {
+  type: 'PUB_TRACK_EVENT'
+  payload: PubTrackEvent
+}
+
+export interface SetStreamDimensionsAction {
+  type: 'STREAM_DIMENSIONS_SET'
+  payload: StreamDimensionsPayload
+}
+
+export const removeLocalStream = (
+  stream: MediaStream,
+  streamType: StreamType,
+): RemoveLocalStreamAction => ({
+  type: constants.STREAM_REMOVE,
+  payload: { stream, streamType },
+})
+
+export const addTrack = (
+  payload: AddTrackPayload,
+): AddTrackAction => ({
+  type: constants.STREAM_TRACK_ADD,
   payload,
 })
 
-export const removeStream = (userId: string): RemoveStreamAction => ({
-  type: constants.STREAM_REMOVE,
-  payload: { userId },
+export const removeTrack = (
+  payload: RemoveTrackPayload,
+): RemoveTrackAction => ({
+  type: constants.STREAM_TRACK_REMOVE,
+  payload,
 })
 
-export const setActive = (userId: string): SetActiveStreamAction => ({
-  type: constants.ACTIVE_SET,
-  payload: { userId },
+export const minimizeToggle = (
+  payload: MinimizeTogglePayload,
+): MinimizeToggleAction => ({
+  type: constants.MINIMIZE_TOGGLE,
+  payload,
 })
 
-export const toggleActive = (userId: string): ToggleActiveStreamAction => ({
-  type: constants.ACTIVE_TOGGLE,
-  payload: { userId },
+export const maximize = (
+  target: MaximizeParams,
+): ThunkResult<void> => (
+  dispatch, getState,
+) => {
+  const streams = getStreamsByState(getState()).all
+
+  const others = streams.map(stream => {
+    const peerId = stream.peerId
+    const streamId = stream.stream?.streamId
+
+    return {
+      peerId,
+      streamId,
+    }
+  })
+  .filter(s => s.peerId !== target.peerId && s.streamId !== target.streamId)
+
+  const action: MaximizeAction = {
+    type: constants.MAXIMIZE,
+    payload: {
+      target,
+      others,
+    },
+  }
+
+  dispatch(action)
+}
+
+export const pubTrackEvent = (
+  payload: PubTrackEvent,
+): PubTrackEventAction => ({
+  type: constants.PUB_TRACK_EVENT,
+  payload,
+})
+
+export const setStreamDimensions = (
+  payload: StreamDimensionsPayload,
+): SetStreamDimensionsAction => ({
+  type: constants.STREAM_DIMENSIONS_SET,
+  payload,
 })
 
 export type StreamAction =
-  AddStreamAction |
-  RemoveStreamAction |
-  SetActiveStreamAction |
-  ToggleActiveStreamAction
+  RemoveLocalStreamAction |
+  MinimizeToggleAction |
+  MaximizeAction |
+  RemoveTrackAction |
+  AddTrackAction |
+  SetStreamDimensionsAction

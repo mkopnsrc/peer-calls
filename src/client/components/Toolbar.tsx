@@ -1,190 +1,279 @@
 import classnames from 'classnames'
 import React from 'react'
+import { MdCallEnd, MdContentCopy, MdFullscreen, MdFullscreenExit, MdLock, MdLockOpen, MdQuestionAnswer, MdScreenShare, MdShare, MdStopScreenShare, MdWarning } from 'react-icons/md'
 import screenfull from 'screenfull'
-import { AddStreamPayload } from '../actions/StreamActions'
+import { getDesktopStream } from '../actions/MediaActions'
+import { Panel, sidebarPanelChat } from '../actions/SidebarActions'
+import { removeLocalStream } from '../actions/StreamActions'
+import { DialState, DIAL_STATE_IN_CALL } from '../constants'
+import { getBrowserFeatures } from '../features'
+import { insertableStreamsCodec } from '../insertable-streams'
+import { LocalStream } from '../reducers/streams'
+import { config } from '../window'
+import { AudioDropdown, VideoDropdown } from './DeviceDropdown'
+import { ShareDesktopDropdown } from './ShareDesktopDropdown'
+import { ToolbarButton } from './ToolbarButton'
 
-const hidden = {
-  display: 'none',
-}
+const { callId } = config
 
 export interface ToolbarProps {
+  dialState: DialState
+  nickname: string
   messagesCount: number
-  stream: AddStreamPayload
-  onToggleChat: () => void
-  onSendFile: (file: File) => void
+  desktopStream: LocalStream | undefined
+  onToggleSidebar: () => void
+  onGetDesktopStream: typeof getDesktopStream
+  onRemoveLocalStream: typeof removeLocalStream
   onHangup: () => void
-  chatVisible: boolean
+  sidebarVisible: boolean
+  sidebarPanel: Panel
 }
 
 export interface ToolbarState {
+  hidden: boolean
   readMessages: number
   camDisabled: boolean
   micMuted: boolean
   fullScreenEnabled: boolean
+  encryptionDialogVisible: boolean
+  encrypted: boolean
 }
 
-export interface ToolbarButtonProps {
-  className?: string
-  badge?: string | number
-  blink?: boolean
-  onClick: () => void
-  icon: string
-  offIcon?: string
-  on?: boolean
-  title: string
+function canShare(navigator: Navigator): boolean {
+  return 'share' in navigator
 }
 
-
-function ToolbarButton(props: ToolbarButtonProps) {
-  const { blink, on } = props
-  const icon = !on && props.offIcon ? props.offIcon : props.icon
-
-  return (
-    <a
-      className={classnames('button', props.className, { blink, on })}
-      onClick={props.onClick}
-      href='#'
-    >
-      <span className={classnames('icon', icon)}>
-        {!!props.badge && <span className='badge'>{props.badge}</span>}
-      </span>
-      <span className="tooltip">{props.title}</span>
-    </a>
-  )
-}
-
-export default class Toolbar
-extends React.PureComponent<ToolbarProps, ToolbarState> {
-  file = React.createRef<HTMLInputElement>()
+export default class Toolbar extends React.PureComponent<
+  ToolbarProps,
+  ToolbarState
+> {
+  encryptionKeyInputRef: React.RefObject<HTMLInputElement>
+  supportsInsertableStreams: boolean
 
   constructor(props: ToolbarProps) {
     super(props)
     this.state = {
+      hidden: false,
       readMessages: props.messagesCount,
       camDisabled: false,
       micMuted: false,
       fullScreenEnabled: false,
+      encryptionDialogVisible: false,
+      encrypted: false,
     }
-  }
 
-  handleMicClick = () => {
-    const { stream } = this.props
-    stream.stream.getAudioTracks().forEach(track => {
-      track.enabled = !track.enabled
-    })
+    this.encryptionKeyInputRef = React.createRef<HTMLInputElement>()
+    this.supportsInsertableStreams = getBrowserFeatures().insertableStreams
+  }
+  componentDidMount() {
+    document.body.addEventListener('click', this.toggleHidden)
+    screenfull.isEnabled && screenfull.on('change', this.fullscreenChange)
+  }
+  componentDidWillUnmount() {
+    document.body.removeEventListener('click', this.toggleHidden)
+    screenfull.isEnabled && screenfull.off('change', this.fullscreenChange)
+  }
+  fullscreenChange = () => {
     this.setState({
-      ...this.state,
-      micMuted: !this.state.micMuted,
+      fullScreenEnabled: screenfull.isEnabled && screenfull.isFullscreen,
     })
   }
-  handleCamClick = () => {
-    const { stream } = this.props
-    stream.stream.getVideoTracks().forEach(track => {
-      track.enabled = !track.enabled
-    })
-    this.setState({
-      ...this.state,
-      camDisabled: !this.state.camDisabled,
-    })
+  toggleHidden = (e: MouseEvent) => {
+    const t = e.target && (e.target as HTMLElement).tagName
+
+    if (t === 'DIV' || t === 'VIDEO') {
+      this.setState({ hidden: !this.state.hidden })
+    }
   }
   handleFullscreenClick = () => {
     if (screenfull.isEnabled) {
       screenfull.toggle()
-      this.setState({
-        ...this.state,
-        fullScreenEnabled: !screenfull.isFullscreen,
-      })
     }
   }
   handleHangoutClick = () => {
     window.location.href = '/'
   }
-  handleSendFile = () => {
-    this.file.current!.click()
+  toggleEncryptionDialog = () => {
+    const encryptionDialogVisible = !this.state.encryptionDialogVisible
+
+    this.setState({
+      encryptionDialogVisible,
+    })
+
+    const inputElement = this.encryptionKeyInputRef.current!
+
+    if (encryptionDialogVisible) {
+      setTimeout(() => {
+        inputElement.focus()
+      })
+    }
   }
-  handleSelectFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
-    Array
-    .from(event.target!.files!)
-    .forEach(file => this.props.onSendFile(file))
+  setPasswordOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key == 'Enter') {
+      this.setPassword()
+    }
   }
-  handleToggleChat = () => {
+  setPassword = () => {
+    const inputElement = this.encryptionKeyInputRef.current!
+    const key = inputElement.value
+    inputElement.value = ''
+
+    const encrypted =
+      insertableStreamsCodec.setPassword(key) &&
+      key.length > 0
+
+    this.setState({
+      encryptionDialogVisible: false,
+      encrypted,
+    })
+  }
+  copyInvitationURL = async () => {
+    const { nickname } = this.props
+    const link = location.href
+    const text = `${nickname} has invited you to a meeting on Peer Calls`
+    if (canShare(navigator)) {
+      await navigator.share({
+        title: 'Peer Call',
+        text,
+        url: link,
+      })
+      return
+    }
+    const value = `${text}. \nRoom: ${callId} \nLink: ${link}`
+    await navigator.clipboard.writeText(value)
+  }
+  handleToggleSidebar = () => {
     this.setState({
       readMessages: this.props.messagesCount,
     })
-    this.props.onToggleChat()
+    this.props.onToggleSidebar()
   }
-  render () {
-    const { messagesCount, stream } = this.props
+  render() {
+    const { messagesCount } = this.props
     const unreadCount = messagesCount - this.state.readMessages
     const hasUnread = unreadCount > 0
+    const isInCall = this.props.dialState === DIAL_STATE_IN_CALL
+
+    const className = classnames('toolbar', {
+      'toolbar-hidden': this.props.sidebarVisible || this.state.hidden,
+    })
+
+    const chatVisible = this.props.sidebarVisible &&
+      this.props.sidebarPanel === sidebarPanelChat
+
+    const encryptionIcon = this.state.encrypted
+      ? MdLock
+      : MdLockOpen
 
     return (
-      <div className="toolbar active">
-        <input
-          style={hidden}
-          type="file"
-          multiple
-          ref={this.file}
-          onChange={this.handleSelectFiles}
-        />
-
-        <ToolbarButton
-          badge={unreadCount}
-          className='chat'
-          icon='icon-question_answer'
-          blink={!this.props.chatVisible && hasUnread}
-          onClick={this.handleToggleChat}
-          on={this.props.chatVisible}
-          title='Toggle Chat'
-        />
-
-        <ToolbarButton
-          className='send-file'
-          icon='icon-file-text2'
-          onClick={this.handleSendFile}
-          title='Send File'
-        />
-
-        {stream && (
-          <React.Fragment>
-            <ToolbarButton
-              onClick={this.handleMicClick}
-              className='mute-audio'
-              on={this.state.micMuted}
-              icon='icon-mic_off'
-              offIcon='icon-mic'
-              title='Toggle Microphone'
-            />
-            <ToolbarButton
-              onClick={this.handleCamClick}
-              className='mute-video'
-              on={this.state.camDisabled}
-              icon='icon-videocam_off'
-              offIcon='icon-videocam'
-              title='Toggle Camera'
-            />
-          </React.Fragment>
-        )}
-
-        <ToolbarButton
-          onClick={this.handleFullscreenClick}
-          className='fullscreen'
-          icon='icon-fullscreen_exit'
-          offIcon='icon-fullscreen'
-          on={this.state.fullScreenEnabled}
-          title='Toggle Fullscreen'
-        />
-
-          {this.props.stream && this.props.stream.stream && (
-            <ToolbarButton
-              onClick={this.props.onHangup}
-              className='hangup'
-              icon='icon-call_end'
-              title="Hang Up"
-            />
+      <React.Fragment>
+        <div className={'toolbar-other ' + className}>
+          <ToolbarButton
+            className='copy-url'
+            key='copy-url'
+            icon={canShare(navigator) ? MdShare : MdContentCopy}
+            onClick={this.copyInvitationURL}
+            title={canShare(navigator) ? 'Share' : 'Copy Invitation URL'}
+          />
+          {isInCall && (
+            <React.Fragment>
+              <ToolbarButton
+                badge={unreadCount}
+                className='toolbar-btn-chat'
+                key='chat'
+                icon={MdQuestionAnswer}
+                blink={!chatVisible && hasUnread}
+                onClick={this.handleToggleSidebar}
+                on={chatVisible}
+                title='Show Sidebar'
+              />
+            </React.Fragment>
           )}
 
-      </div>
+          {config.peerConfig.encodedInsertableStreams && (
+            <div className='encryption-wrapper'>
+              <ToolbarButton
+                onClick={this.toggleEncryptionDialog}
+                key='encryption'
+                className={classnames('encryption', {
+                  'encryption-enabled': this.state.encrypted,
+                })}
+                on={this.state.encryptionDialogVisible || this.state.encrypted}
+                icon={encryptionIcon}
+                title='Setup Encryption'
+              />
+              <div
+                className={classnames('encryption-dialog', {
+                  'encryption-dialog-visible':
+                    this.state.encryptionDialogVisible,
+                })}
+              >
+                <div className='encryption-form'>
+                  <input
+                    autoComplete='off'
+                    name='encryption-key'
+                    className='encryption-key'
+                    placeholder='Enter Passphrase'
+                    ref={this.encryptionKeyInputRef}
+                    type='password'
+                    onKeyUp={this.setPasswordOnEnter}
+                  />
+                  <button onClick={this.setPassword}>Save</button>
+                </div>
+                <div className='note'>
+                  <p><MdWarning /> Experimental functionality for A/V only.</p>
+                  {!this.supportsInsertableStreams && (
+                    <p>
+                      Your browser does not support Insertable Streams;
+                      currently only Chrome has support. If you are using
+                      Chrome, please make sure Experimental Web Platform
+                      Features are enabled in chrome://flags.
+                    </p>
+                  )} </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {isInCall && (
+          <div className={'toolbar-call ' + className}>
+            <ShareDesktopDropdown
+              className='stream-desktop'
+              icon={MdScreenShare}
+              offIcon={MdStopScreenShare}
+              key='stream-desktop'
+              title='Share Desktop'
+              desktopStream={this.props.desktopStream}
+              onGetDesktopStream={this.props.onGetDesktopStream}
+              onRemoveLocalStream={this.props.onRemoveLocalStream}
+            />
+
+            <VideoDropdown />
+
+            <ToolbarButton
+              onClick={this.props.onHangup}
+              key='hangup'
+              className='hangup'
+              icon={MdCallEnd}
+              title='Hang Up'
+            />
+
+            <AudioDropdown />
+
+            <ToolbarButton
+              onClick={this.handleFullscreenClick}
+              className='fullscreen'
+              key='fullscreen'
+              icon={MdFullscreenExit}
+              offIcon={MdFullscreen}
+              on={this.state.fullScreenEnabled}
+              title='Fullscreen'
+            />
+
+          </div>
+        )}
+      </React.Fragment>
     )
   }
 }

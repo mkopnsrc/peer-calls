@@ -1,23 +1,27 @@
 jest.mock('../window')
 jest.mock('simple-peer')
+jest.useFakeTimers()
 
-import * as PeerActions from './PeerActions'
-import Peer from 'simple-peer'
 import { EventEmitter } from 'events'
-import { createStore, Store, GetState } from '../store'
 import { Dispatch } from 'redux'
+import Peer from 'simple-peer'
+import { Encoder } from '../codec'
+import { HANG_UP, PEER_EVENT_DATA } from '../constants'
 import { ClientSocket } from '../socket'
+import { createStore, GetState, Store } from '../store'
+import { TextEncoder } from '../textcodec'
+import { MessageType } from './ChatActions'
+import * as PeerActions from './PeerActions'
 
 describe('PeerActions', () => {
   function createSocket () {
     const socket = new EventEmitter() as unknown as ClientSocket
-    socket.id = 'user1'
     return socket
   }
 
   let socket: ClientSocket
   let stream: MediaStream
-  let user: { id: string }
+  let peer: { id: string }
   let store: Store
   let instances: Peer.Instance[]
   let dispatch: Dispatch
@@ -29,7 +33,7 @@ describe('PeerActions', () => {
     dispatch = store.dispatch
     getState = store.getState
 
-    user = { id: 'user2' }
+    peer = { id: 'user1' }
     socket = createSocket()
     instances = (Peer as any).instances = [];
     (Peer as unknown as jest.Mock).mockClear()
@@ -39,7 +43,7 @@ describe('PeerActions', () => {
 
   describe('create', () => {
     it('creates a new peer', () => {
-      PeerActions.createPeer({ socket, user, initiator: 'user2', stream })(
+      PeerActions.createPeer({ socket, peer, initiator: false, stream })(
         dispatch, getState)
 
       expect(instances.length).toBe(1)
@@ -51,7 +55,7 @@ describe('PeerActions', () => {
     it('sets initiator correctly', () => {
       PeerActions
       .createPeer({
-        socket, user, initiator: 'user1', stream,
+        socket, peer, initiator: true, stream,
       })(dispatch, getState)
 
       expect(instances.length).toBe(1)
@@ -61,9 +65,9 @@ describe('PeerActions', () => {
     })
 
     it('destroys old peer before creating new one', () => {
-      PeerActions.createPeer({ socket, user, initiator: 'user2', stream })(
+      PeerActions.createPeer({ socket, peer, initiator: false, stream })(
         dispatch, getState)
-      PeerActions.createPeer({ socket, user, initiator: 'user2', stream })(
+      PeerActions.createPeer({ socket, peer, initiator: true, stream })(
         dispatch, getState)
 
       expect(instances.length).toBe(2)
@@ -74,42 +78,46 @@ describe('PeerActions', () => {
   })
 
   describe('events', () => {
-    let peer: Peer.Instance
-
-    beforeEach(() => {
-      PeerActions.createPeer({ socket, user, initiator: 'user1', stream })(
+    function createPeer() {
+      PeerActions.createPeer({ socket, peer, initiator: true, stream })(
         dispatch, getState)
-      peer = instances[0]
-    })
+      const pc = instances[instances.length - 1]
+      return pc
+    }
 
     describe('connect', () => {
-      beforeEach(() => peer.emit('connect'))
-
       it('dispatches peer connection established message', () => {
+        createPeer().emit('connect')
         // TODO
       })
     })
 
     describe('data', () => {
 
-      beforeEach(() => {
-        (window as any).TextDecoder = class TextDecoder {
-          constructor (readonly encoding: string) {
-          }
-          decode (object: any) {
-            return object.toString(this.encoding)
-          }
+      it('decodes a message', async () => {
+        const pc = createPeer()
+        const message: MessageType = {
+          timestamp: new Date().toISOString(),
+          peerId: 'test-user',
+          type: 'text',
+          payload: 'test',
         }
-      })
-
-      it('decodes a message', () => {
-        const payload = 'test'
-        const object = JSON.stringify({ payload })
-        peer.emit('data', Buffer.from(object, 'utf-8'))
+        const encoder = new Encoder()
+        encoder.on('data', event => {
+          pc.emit(PEER_EVENT_DATA, event.chunk)
+        })
+        const messageId = encoder.encode({
+          senderId: peer.id,
+          data: new TextEncoder().encode(JSON.stringify(message)),
+        })
+        const promise = encoder.waitFor(messageId)
+        jest.runAllTimers()
+        await promise
         const { list } = store.getState().messages
+        expect(list.length).toBeGreaterThan(0)
         expect(list[list.length - 1]).toEqual({
-          userId: 'user2',
-          timestamp: jasmine.any(String),
+          peerId: 'test-user',
+          timestamp: new Date(message.timestamp).toLocaleString(),
           image: undefined,
           message: 'test',
         })
@@ -120,28 +128,32 @@ describe('PeerActions', () => {
   describe('get', () => {
     it('returns undefined when not found', () => {
       const { peers } = store.getState()
-      expect(peers[user.id]).not.toBeDefined()
+      expect(peers[peer.id]).not.toBeDefined()
     })
 
     it('returns Peer instance when found', () => {
-      PeerActions.createPeer({ socket, user, initiator: 'user2', stream })(
+      PeerActions.createPeer({ socket, peer, initiator: false, stream })(
         dispatch, getState)
 
       const { peers } = store.getState()
-      expect(peers[user.id]).toBe(instances[0])
+      expect(peers[peer.id].instance).toBe(instances[0])
     })
   })
 
   describe('destroyPeers', () => {
     it('destroys all peers and removes them', () => {
       PeerActions.createPeer({
-        socket, user: { id: 'user2' }, initiator: 'user2', stream,
+        socket, peer: { id: 'user2' }, initiator: true, stream,
       })(dispatch, getState)
       PeerActions.createPeer({
-        socket, user: { id: 'user3' }, initiator: 'user3', stream,
+        socket, peer: { id: 'user3' }, initiator: false, stream,
       })(dispatch, getState)
 
-      store.dispatch(PeerActions.destroyPeers())
+      store.dispatch({
+        type: HANG_UP,
+      })
+
+      jest.runAllTimers()
 
       expect((instances[0].destroy as jest.Mock).mock.calls.length).toEqual(1)
       expect((instances[1].destroy as jest.Mock).mock.calls.length).toEqual(1)
@@ -151,26 +163,4 @@ describe('PeerActions', () => {
     })
   })
 
-  describe('sendMessage', () => {
-
-    beforeEach(() => {
-      PeerActions.createPeer({
-        socket, user: { id: 'user2' }, initiator: 'user2', stream,
-      })(dispatch, getState)
-      PeerActions.createPeer({
-        socket, user: { id: 'user3' }, initiator: 'user3', stream,
-      })(dispatch, getState)
-    })
-
-    it('sends a message to all peers', () => {
-      PeerActions.sendMessage({ payload: 'test', type: 'text' })(
-        dispatch, getState)
-      const { peers } = store.getState()
-      expect((peers['user2'].send as jest.Mock).mock.calls)
-      .toEqual([[ '{"payload":"test","type":"text"}' ]])
-      expect((peers['user3'].send as jest.Mock).mock.calls)
-      .toEqual([[ '{"payload":"test","type":"text"}' ]])
-    })
-
-  })
 })

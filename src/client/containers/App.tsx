@@ -1,31 +1,44 @@
 import { connect } from 'react-redux'
-import { init } from '../actions/CallActions'
-import { play } from '../actions/MediaActions'
+import { hangUp, init } from '../actions/CallActions'
+import { sendFile, sendText } from '../actions/ChatActions'
+import { getDesktopStream, play } from '../actions/MediaActions'
 import { dismissNotification } from '../actions/NotifyActions'
-import { sendFile, sendMessage } from '../actions/PeerActions'
-import { toggleActive, removeStream } from '../actions/StreamActions'
+import { sidebarHide, sidebarShow, sidebarToggle } from '../actions/SidebarActions'
+import { maximize, minimizeToggle, removeLocalStream, setStreamDimensions } from '../actions/StreamActions'
 import App from '../components/App'
 import { State } from '../store'
 
 function mapStateToProps (state: State) {
   return {
+    dialState: state.media.dialState,
     streams: state.streams,
     peers: state.peers,
     notifications: state.notifications,
+    nicknames: state.nicknames,
     messages: state.messages.list,
     messagesCount: state.messages.count,
-    active: state.active,
+    windowStates: state.windowStates,
+    settings: state.settings,
+    sidebarVisible: state.sidebar.visible,
+    sidebarPanel: state.sidebar.panel,
   }
 }
 
 const mapDispatchToProps = {
-  toggleActive,
-  sendMessage,
+  hangUp,
+  minimizeToggle,
+  maximize,
+  sendText,
   dismissNotification,
-  removeStream,
+  getDesktopStream,
+  removeLocalStream,
   init,
-  onSendFile: sendFile,
+  sendFile,
   play,
+  sidebarToggle,
+  sidebarHide,
+  sidebarShow,
+  setStreamDimensions,
 }
 
 export default connect(mapStateToProps, mapDispatchToProps)(App)

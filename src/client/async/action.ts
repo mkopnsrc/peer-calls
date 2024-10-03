@@ -14,6 +14,15 @@ export type RejectedAction<T extends string> = Action<T> & {
   status: 'rejected'
 }
 
+export function isRejectedAction(
+  value: unknown,
+): value is RejectedAction<string> {
+  // eslint-disable-next-line
+  const v = value as any
+  return !!v && 'type' in v && typeof v.type === 'string' &&
+    'status' in v && v.status === 'rejected'
+}
+
 export type AsyncAction<T extends string, P> =
   PendingAction<T, P> |
   ResolvedAction<T, P> |
@@ -35,7 +44,7 @@ export type GetAllActions<T> = {
 export type GetAllAsyncActions<T> = GetAsyncAction<GetAllActions<T>>
 
 function isPromise(value: unknown): value is Promise<unknown> {
-  return value && typeof value === 'object' &&
+  return !!value && typeof value === 'object' &&
     typeof (value as Promise<unknown>).then === 'function'
 }
 

@@ -1,23 +1,54 @@
-FROM node:12-alpine
-WORKDIR /app
-RUN chown node:node /app
-COPY package.json .
-USER node
-RUN npm install
-COPY . .
-RUN npm run build
-RUN rm -rf node_modules build/index.prod.js
+FROM node:18.13-alpine as frontend
 
-FROM node:12-alpine
-WORKDIR /app
-RUN chown node:node /app
-USER node
-COPY package.json .
-RUN npm install --production && rm -rf ~/.npm
-COPY --from=0 /app .
-USER root
-RUN chown -R root:root .
-USER node
-EXPOSE 3000
+# Add dependency instructions and fetch node_modules
+COPY package.json package-lock.json /src/
+WORKDIR /src
+
+RUN set -ex \
+ && apk add --no-cache \
+      git \
+ && npm ci
+
+# Add the application itself
+COPY ./ /src/
+
+RUN set -ex \
+ && npm run build
+
+
+FROM golang:1.19.5-alpine as server
+
+ENV CGO_ENABLED=0
+
+RUN set -ex \
+ && apk add --no-cache \
+      git
+
+# Add dependencies into mod cache
+COPY go.mod go.sum /src/
+WORKDIR /src
+
+RUN set -ex \
+ && go mod download
+
+# Add the application itself and build it
+COPY                  ./          /src/
+COPY --from=frontend  /src/build/ /src/build/
+
+ARG VERSION
+
+RUN set -ex \
+ && go build \
+      -ldflags "-X main.GitDescribe=$(git describe --always --tags --dirty)" \
+      -mod=readonly \
+      -o peer-calls
+
+
+FROM scratch
+
+COPY --from=server /src/peer-calls /usr/local/bin/
+
+EXPOSE 3000/tcp
 STOPSIGNAL SIGINT
-ENTRYPOINT ["node", "lib/index.js"]
+
+ENTRYPOINT ["/usr/local/bin/peer-calls"]

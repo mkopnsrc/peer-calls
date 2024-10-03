@@ -2,10 +2,11 @@ import CSSTransition from 'react-transition-group/CSSTransition'
 import TransitionGroup from 'react-transition-group/TransitionGroup'
 import React from 'react'
 import classnames from 'classnames'
-import { dismissNotification, Notification } from '../actions/NotifyActions'
+import { dismissNotification, Notification as NotificationType } from '../actions/NotifyActions'
 
 export interface NotificationsProps {
-  notifications: Record<string, Notification>
+  className?: string
+  notifications: Record<string, NotificationType>
   dismiss: typeof dismissNotification
   max: number
 }
@@ -16,7 +17,7 @@ const transitionTimeout = {
 }
 
 export interface NotificationProps {
-  notification: Notification
+  notification: NotificationType
   dismiss: typeof dismissNotification
   timeout: number
 }
@@ -38,9 +39,9 @@ extends React.PureComponent<NotificationsProps> {
     max: 20,
   }
   render () {
-    const { dismiss, notifications, max } = this.props
+    const { className, dismiss, notifications, max } = this.props
     return (
-      <div className="notifications" tabIndex={0}>
+      <div className={classnames('notifications', className)} tabIndex={0}>
         <TransitionGroup>
           {Object.keys(notifications).slice(-max).reverse().map(id => (
             <CSSTransition

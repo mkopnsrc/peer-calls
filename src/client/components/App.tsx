@@ -1,143 +1,129 @@
 import classnames from 'classnames'
-import map from 'lodash/map'
+import forEach from 'lodash/forEach'
 import React from 'react'
-import Peer from 'simple-peer'
-import { Message } from '../actions/ChatActions'
+import { hangUp } from '../actions/CallActions'
+import { getDesktopStream } from '../actions/MediaActions'
 import { dismissNotification, Notification } from '../actions/NotifyActions'
-import { TextMessage } from '../actions/PeerActions'
-import { AddStreamPayload, removeStream } from '../actions/StreamActions'
+import { Panel, sidebarPanelChat } from '../actions/SidebarActions'
+import { MaximizeParams, MinimizeTogglePayload, removeLocalStream, setStreamDimensions, StreamTypeDesktop } from '../actions/StreamActions'
 import * as constants from '../constants'
-import Chat from './Chat'
+import { Message } from '../reducers/messages'
+import { Nicknames } from '../reducers/nicknames'
+import { PeersState } from '../reducers/peers'
+import { SettingsState } from '../reducers/settings'
+import { StreamsState } from '../reducers/streams'
+import { WindowStates } from '../reducers/windowStates'
 import { Media } from './Media'
 import Notifications from './Notifications'
-import { Side } from './Side'
+import Sidebar from './Sidebar'
 import Toolbar from './Toolbar'
-import Video from './Video'
+import Videos from './Videos'
 
 export interface AppProps {
-  active: string | null
+  dialState: constants.DialState
   dismissNotification: typeof dismissNotification
   init: () => void
+  nicknames: Nicknames
   notifications: Record<string, Notification>
   messages: Message[]
   messagesCount: number
-  peers: Record<string, Peer.Instance>
+  peers: PeersState
   play: () => void
-  sendMessage: (message: TextMessage) => void
-  streams: Record<string, AddStreamPayload>
-  removeStream: typeof removeStream
-  onSendFile: (file: File) => void
-  toggleActive: (userId: string) => void
+  sendText: (message: string) => void
+  streams: StreamsState
+  getDesktopStream: typeof getDesktopStream
+  removeLocalStream: typeof removeLocalStream
+  sendFile: (file: File) => void
+  windowStates: WindowStates
+  maximize: (payload: MaximizeParams) => void
+  minimizeToggle: (payload: MinimizeTogglePayload) => void
+  hangUp: typeof hangUp
+  setStreamDimensions: typeof setStreamDimensions
+  settings: SettingsState
+  sidebarVisible: boolean
+  sidebarPanel: Panel
+  sidebarToggle: () => void
+  sidebarHide: () => void
+  sidebarShow: (panel?: Panel) => void
 }
 
-export interface AppState {
-  videos: Record<string, unknown>
-  chatVisible: boolean
-}
-
-export default class App extends React.PureComponent<AppProps, AppState> {
-  state: AppState = {
-    videos: {},
-    chatVisible: false,
-  }
-  handleShowChat = () => {
-    this.setState({
-      chatVisible: true,
-    })
-  }
-  handleHideChat = () => {
-    this.setState({
-      chatVisible: false,
-    })
-  }
-  handleToggleChat = () => {
-    return this.state.chatVisible
-      ? this.handleHideChat()
-      : this.handleShowChat()
-  }
+export default class App extends React.PureComponent<AppProps> {
   componentDidMount () {
     const { init } = this.props
     init()
   }
-  onHangup = () => {
-    this.props.removeStream(constants.ME)
+  sidebarShowChat = () => {
+    this.props.sidebarShow(sidebarPanelChat)
   }
-  render () {
+  onHangup = () => {
+    const { localStreams } = this.props.streams
+    forEach(localStreams, s => {
+      this.props.removeLocalStream(s!.stream, s!.type)
+    })
+    this.props.hangUp()
+  }
+  render() {
     const {
-      active,
       dismissNotification,
       notifications,
+      nicknames,
       messages,
       messagesCount,
-      onSendFile,
-      play,
-      peers,
-      sendMessage,
-      toggleActive,
-      streams,
+      minimizeToggle,
+      maximize,
+      sendFile,
+      sendText,
+      setStreamDimensions,
+      settings,
     } = this.props
 
-    const { videos } = this.state
-
-    const chatVisibleClassName = classnames({
-      'chat-visible': this.state.chatVisible,
+    const sidebarVisibleClassName = classnames({
+      'sidebar-visible': this.props.sidebarVisible,
     })
+
+    const { localStreams } = this.props.streams
 
     return (
       <div className="app">
-        <Side align='flex-end' left zIndex={2}>
-          <Toolbar
-            chatVisible={this.state.chatVisible}
-            messagesCount={messagesCount}
-            onToggleChat={this.handleToggleChat}
-            onSendFile={onSendFile}
-            onHangup={this.onHangup}
-            stream={streams[constants.ME]}
-          />
-        </Side>
-        <Side className={chatVisibleClassName} top zIndex={1}>
-          <Notifications
-            dismiss={dismissNotification}
-            notifications={notifications}
-          />
-          <Media />
-        </Side>
-        <Chat
-          messages={messages}
-          onClose={this.handleHideChat}
-          sendMessage={sendMessage}
-          visible={this.state.chatVisible}
+        <Toolbar
+          sidebarPanel={this.props.sidebarPanel}
+          sidebarVisible={this.props.sidebarVisible}
+          dialState={this.props.dialState}
+          messagesCount={messagesCount}
+          nickname={nicknames[constants.ME]}
+          onToggleSidebar={this.sidebarShowChat}
+          onHangup={this.onHangup}
+          desktopStream={localStreams[StreamTypeDesktop]}
+          onGetDesktopStream={this.props.getDesktopStream}
+          onRemoveLocalStream={this.props.removeLocalStream}
         />
-        <div className={classnames('videos', chatVisibleClassName)}>
-          {streams[constants.ME] && (
-            <Video
-              videos={videos}
-              active={active === constants.ME}
-              onClick={toggleActive}
-              play={play}
-              stream={streams[constants.ME]}
-              userId={constants.ME}
-              muted
-              mirrored
-            />
-          )}
-
-          {
-            map(peers, (_, userId) => userId)
-            .filter(stream => !!stream)
-            .map(userId =>
-              <Video
-                active={userId === active}
-                key={userId}
-                onClick={toggleActive}
-                play={play}
-                stream={streams[userId]}
-                userId={userId}
-                videos={videos}
-              />,
-            )
-          }
-        </div>
+        <Notifications
+          className={sidebarVisibleClassName}
+          dismiss={dismissNotification}
+          notifications={notifications}
+        />
+        <Sidebar
+          onHide={this.props.sidebarHide}
+          onShow={this.props.sidebarShow}
+          panel={this.props.sidebarPanel}
+          visible={this.props.sidebarVisible}
+          messages={messages}
+          nicknames={nicknames}
+          onMinimizeToggle={minimizeToggle}
+          play={this.props.play}
+          sendText={sendText}
+          sendFile={sendFile}
+        />
+        <Media />
+        {this.props.dialState !== constants.DIAL_STATE_HUNG_UP &&
+          <Videos
+            onMaximize={maximize}
+            onMinimizeToggle={minimizeToggle}
+            onDimensions={setStreamDimensions}
+            play={this.props.play}
+            showMinimizedToolbar={settings.showMinimizedToolbar}
+          />
+        }
       </div>
     )
   }

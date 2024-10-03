@@ -1,15 +1,21 @@
-import React, { ReactEventHandler, ChangeEventHandler, KeyboardEventHandler, MouseEventHandler } from 'react'
-import { TextMessage } from '../actions/PeerActions'
+import React, { ChangeEventHandler, KeyboardEventHandler, MouseEventHandler, ReactEventHandler } from 'react'
+import { MdSentimentSatisfied } from 'react-icons/md'
 
 export interface InputProps {
-  sendMessage: (message: TextMessage) => void
+  sendFile: (file: File) => void
+  sendText: (message: string) => void
 }
 
 export interface InputState {
   message: string
 }
 
+const hidden = {
+  display: 'none',
+}
+
 export default class Input extends React.PureComponent<InputProps, InputState> {
+  file = React.createRef<HTMLInputElement>()
   textArea = React.createRef<HTMLTextAreaElement>()
   state = {
     message: '',
@@ -34,35 +40,34 @@ export default class Input extends React.PureComponent<InputProps, InputState> {
       message: this.textArea.current!.value + event.currentTarget.innerHTML,
     })
   }
+  handleSelectFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
+    Array.from(event.target!.files!)
+    .forEach((file) =>
+      this.props.sendFile(file),
+    )
+  }
   submit = () => {
-    const { sendMessage } = this.props
+    const { sendText } = this.props
     const { message } = this.state
     if (message) {
-      sendMessage({
-        payload: message,
-        type: 'text',
-      })
-      // let image = null
-
-      // // take snapshoot
-      // try {
-      //   const video = videos[userId]
-      //   if (video) {
-      //     const canvas = document.createElement('canvas')
-      //     canvas.height = video.videoHeight
-      //     canvas.width = video.videoWidth
-      //     const avatar = canvas.getContext('2d')
-      //     avatar.drawImage(video, 0, 0, canvas.width, canvas.height)
-      //     image = canvas.toDataURL()
-      //   }
-      // } catch (e) {}
+      sendText(message)
     }
     this.setState({ message: '' })
+  }
+  handleSendFile = () => {
+    this.file.current!.click()
   }
   render () {
     const { message } = this.state
     return (
       <form className="chat-controls" onSubmit={this.handleSubmit}>
+        <input
+          style={hidden}
+          type='file'
+          multiple
+          ref={this.file}
+          onChange={this.handleSelectFiles}
+        />
         <textarea
           className="chat-controls-textarea"
           onChange={this.handleChange}
@@ -73,23 +78,30 @@ export default class Input extends React.PureComponent<InputProps, InputState> {
         />
         <div className="chat-controls-buttons">
           <input type="submit" value="Send"
-            className="chat-controls-buttons-send" />
+            className="chat-controls-buttons-send"
+          />
+          <input
+            type="submit"
+            value="Send File"
+            className="chat-controls-buttons-send-file"
+            onClick={this.handleSendFile}
+          />
 
           <div className="chat-controls-buttons-wrapper">
             <div className="emoji">
               <div className="chat-controls-buttons-smiles">
-                <span className="icon icon-sentiment_satisfied" />
+                <MdSentimentSatisfied />
                 <div className="chat-controls-buttons-smiles-menu">
-                  <div className="chat-controls-buttons-smile"
-                    onClick={this.handleSmileClick}>😑</div>
-                  <div className="chat-controls-buttons-smile"
-                    onClick={this.handleSmileClick}>😕</div>
-                  <div className="chat-controls-buttons-smile"
-                    onClick={this.handleSmileClick}>😊</div>
-                  <div className="chat-controls-buttons-smile"
-                    onClick={this.handleSmileClick}>😎</div>
-                  <div className="chat-controls-buttons-smile"
-                    onClick={this.handleSmileClick}>💪</div>
+                  <span className="chat-controls-buttons-smile"
+                    onClick={this.handleSmileClick}>😑</span>
+                  <span className="chat-controls-buttons-smile"
+                    onClick={this.handleSmileClick}>😕</span>
+                  <span className="chat-controls-buttons-smile"
+                    onClick={this.handleSmileClick}>😊</span>
+                  <span className="chat-controls-buttons-smile"
+                    onClick={this.handleSmileClick}>😎</span>
+                  <span className="chat-controls-buttons-smile"
+                    onClick={this.handleSmileClick}>💪</span>
                 </div>
               </div>
             </div>

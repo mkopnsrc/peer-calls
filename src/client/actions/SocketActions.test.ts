@@ -1,56 +1,72 @@
-jest.mock('simple-peer')
+jest.mock('../insertable-streams')
 jest.mock('../window')
+jest.mock('simple-peer')
+// jest.mock('../actions/NicknameActions')
 
+import * as NicknameActions from './NicknameActions'
 import * as SocketActions from './SocketActions'
 import * as constants from '../constants'
 import Peer from 'simple-peer'
 import { EventEmitter } from 'events'
-import { createStore, Store, GetState } from '../store'
+import { createStore, Store } from '../store'
 import { ClientSocket } from '../socket'
-import { Dispatch } from 'redux'
-import { MediaStream } from '../window'
+import { MediaStream, MediaStreamTrack } from '../window'
+import { SocketEvent } from '../SocketEvent'
+import { StreamsState } from '../reducers/streams'
 
 describe('SocketActions', () => {
   const roomName = 'bla'
 
   let socket: ClientSocket
   let store: Store
-  let dispatch: Dispatch
-  let getState: GetState
   let instances: Peer.Instance[]
   beforeEach(() => {
     socket = new EventEmitter() as any;
     (socket as any).id = 'a'
 
     store = createStore()
-    getState = store.getState
-    dispatch = store.dispatch
 
     instances = (Peer as any).instances = []
   })
 
+  const peerA = 'peer-a'
+  const peerId = peerA
+
+  const peerB = 'peer-b'
+  const peerC = 'peer-c'
+
+  const nickname = 'john'
+
+  const nicknames: Record<string, string> = {
+    [peerA]: 'user one',
+    [peerB]: 'user two',
+    [peerC]: 'user three',
+  }
+
   describe('handshake', () => {
     describe('users', () => {
       beforeEach(() => {
-        SocketActions.handshake({ socket, roomName })(dispatch, getState)
+        SocketActions.handshake({ nickname, socket, roomName, peerId, store })
         const payload = {
-          users: [{ id: 'a' }, { id: 'b' }],
-          initiator: 'a',
+          initiator: peerA,
+          peerIds: [peerA, peerB],
+          nicknames,
         }
         socket.emit('users', payload)
         expect(instances.length).toBe(1)
       })
 
-      it('adds a peer for each new user and destroys peers for missing', () => {
+      it('adds a peer for each new user and keeps active connections', () => {
         const payload = {
-          users: [{ id: 'a' }, { id: 'c' }],
-          initiator: 'c',
+          peerIds: [peerA, peerC],
+          initiator:  peerC,
+          nicknames,
         }
         socket.emit(constants.SOCKET_EVENT_USERS, payload)
 
         // then
         expect(instances.length).toBe(2)
-        expect((instances[0].destroy as jest.Mock).mock.calls.length).toBe(1)
+        expect((instances[0].destroy as jest.Mock).mock.calls.length).toBe(0)
         expect((instances[1].destroy as jest.Mock).mock.calls.length).toBe(0)
       })
     })
@@ -59,16 +75,17 @@ describe('SocketActions', () => {
       let data: Peer.SignalData
       beforeEach(() => {
         data = {} as any
-        SocketActions.handshake({ socket, roomName })(dispatch, getState)
+        SocketActions.handshake({ nickname, socket, roomName, peerId, store })
         socket.emit('users', {
-          initiator: 'a',
-          users: [{ id: 'a' }, { id: 'b' }],
+          initiator: peerA,
+          peerIds: [peerA, peerB],
+          nicknames,
         })
       })
 
       it('should forward signal to peer', () => {
         socket.emit('signal', {
-          userId: 'b',
+          peerId: peerB,
           signal: data,
         })
 
@@ -78,7 +95,7 @@ describe('SocketActions', () => {
 
       it('does nothing if no peer', () => {
         socket.emit('signal', {
-          userId: 'a',
+          peerId: 'a',
           signal: data,
         })
 
@@ -94,11 +111,12 @@ describe('SocketActions', () => {
       let ready = false
       socket.once('ready', () => { ready = true })
 
-      SocketActions.handshake({ socket, roomName })(dispatch, getState)
+      SocketActions.handshake({ nickname, socket, roomName, peerId, store })
 
       socket.emit('users', {
-        initiator: 'a',
-        users: [{ id: 'a' }, { id: 'b' }],
+        initiator: peerA,
+        peerIds: [peerA, peerB],
+        nicknames,
       })
       expect(instances.length).toBe(1)
       peer = instances[0]
@@ -117,8 +135,8 @@ describe('SocketActions', () => {
       it('emits socket signal with user id', done => {
         const signal = { bla: 'bla' }
 
-        socket.once('signal', (payload: SocketActions.SignalOptions) => {
-          expect(payload.userId).toEqual('b')
+        socket.once('signal', (payload: SocketEvent['signal']) => {
+          expect(payload.peerId).toEqual(peerB)
           expect(payload.signal).toBe(signal)
           done()
         })
@@ -127,44 +145,107 @@ describe('SocketActions', () => {
       })
     })
 
-    describe('stream', () => {
-      it('adds a stream to streamStore', () => {
-        const stream = {
-          getTracks() {
-            return [{
-              stop: jest.fn(),
-            }]
-          },
-        }
-        peer.emit(constants.PEER_EVENT_STREAM, stream)
+    function tr(mid: string): RTCRtpTransceiver {
+      return { mid } as RTCRtpTransceiver
+    }
 
-        expect(store.getState().streams).toEqual({
-          b: {
-            userId: 'b',
-            stream,
-            url: jasmine.any(String),
+    describe('track unmute event', () => {
+      it('adds a stream to streamStore', () => {
+        const stream = new MediaStream()
+        const track = new MediaStreamTrack()
+        ;(track as any).muted = true
+        stream.addTrack(track)
+        peer.emit(constants.PEER_EVENT_TRACK, track, stream, tr('0'))
+
+        expect(track.onunmute).toBeDefined()
+        // browsers should call onunmute after 'track' event, when track is
+        // ready
+        track.onunmute!(new Event('unmute'))
+        const { streams } = store.getState()
+        expect(streams).toEqual({
+          localStreams: {},
+          pubStreams: {},
+          pubStreamsKeysByPeerId: {},
+          remoteStreamsKeysByClientId: {
+            [peerB]: {
+              [stream.id]: undefined,
+            },
           },
-        })
+          remoteStreams: {
+            [stream.id]: {
+              stream: jasmine.any(MediaStream) as any,
+              streamId: stream.id,
+              url: jasmine.any(String) as any,
+            },
+          },
+        } as StreamsState)
+        const mediaStream = streams.remoteStreams[stream.id].stream
+        expect(mediaStream.getTracks()).toEqual([ track ])
+      })
+    })
+
+    describe('track mute event', () => {
+      it('removes track and stream from store', () => {
+        const stream = new MediaStream()
+        const track = new MediaStreamTrack()
+        stream.addTrack(track)
+        peer.emit(constants.PEER_EVENT_TRACK, track, stream, tr('0'))
+        expect(track.onunmute).toBeDefined()
+        track.onunmute!(new Event('unmute'))
+        expect(track.onmute).toBeDefined()
+        track.onmute!(new Event('mute'))
+        const { streams } = store.getState()
+        expect(streams).toEqual({
+          localStreams: {},
+          pubStreamsKeysByPeerId: {},
+          pubStreams: {},
+          remoteStreamsKeysByClientId: {},
+          remoteStreams: {},
+        } as StreamsState)
+      })
+    })
+
+    describe('hangUp', () => {
+      beforeEach(() => {
+        SocketActions.handshake({ nickname, socket, roomName, peerId, store })
+        store.dispatch(NicknameActions.setNicknames({
+          a: 'A',
+        }))
+      })
+
+      it('emits a removeNickname event', () => {
+        socket.emit(constants.SOCKET_EVENT_HANG_UP, { peerId: 'a' })
+        expect(store.getState().nicknames).not.toHaveProperty('a')
       })
     })
 
     describe('close', () => {
       beforeEach(() => {
         const stream = new MediaStream()
-        peer.emit(constants.PEER_EVENT_STREAM, stream)
-        expect(store.getState().streams).toEqual({
-          b: {
-            userId: 'b',
-            stream,
-            url: jasmine.any(String),
-          },
-        })
+        const track = new MediaStreamTrack()
+        const mid = '0'
+        peer.emit(constants.PEER_EVENT_TRACK, track, stream, tr(mid))
+        const s = store.getState().streams.remoteStreams[stream.id]
+        expect(s).toBeTruthy()
+        expect(s.streamId).toBe(stream.id)
+        expect(s.stream.getTracks()).toEqual([ track ])
       })
 
       it('removes stream & peer from store', () => {
-        expect(store.getState().peers).toEqual({ b: peer })
+        expect(store.getState().peers).toEqual({
+          [peerB]: {
+            instance: peer,
+            senders: {},
+          },
+        })
         peer.emit('close')
-        expect(store.getState().streams).toEqual({})
+        expect(store.getState().streams).toEqual({
+          localStreams: {},
+          pubStreamsKeysByPeerId: {},
+          pubStreams: {},
+          remoteStreamsKeysByClientId: {},
+          remoteStreams: {},
+        } as StreamsState)
         expect(store.getState().peers).toEqual({})
       })
     })
